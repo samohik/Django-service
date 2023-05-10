@@ -8,18 +8,18 @@
 ```python manage.py createsuperuser```  
 ```python manage.py runserver```
 
-## Paths:
+## Paths :
 - `/swagger` - Documentation  
-- `/registration` 
+- `/api/registration` 
   - `post` - Create a new user  
-- `/friends`   
+- `/api/friends`   
   - `get` - View a user's list of friends.  
-- `/friends/<int:id>`
+- `/api/friends/<int:id>`
   - `get` - Get a user friend status with some other user.  
   - `delete` - Remove a user from another user from their friends.  
-- `/requests` 
+- `/api/requests` 
   - `get` - View to the user a list of their outgoing and incoming friend requests.  
   - `post` - Sends a friend request and works out according to the situation.  
-- `/requests/<int:id>`
+- `/api/requests/<int:id>`
   - `get` - Status check with user.   
   - `post` - Accept or reject a user's friend request from another user.  

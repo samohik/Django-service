@@ -1,4 +1,5 @@
 # Django-service  
+
 ## Instructions:  
 ```pip install -r requirements.txt```  
 ```cd social_web```  
@@ -6,7 +7,11 @@
 ```python manage.py migrate```  
 ```python manage.py test```  
 ```python manage.py createsuperuser```  
-```python manage.py runserver```
+```python manage.py runserver```  
+
+### or using Docker:  
+```sudo docker-compose build```  
+```sudo docker-compose up```  
 
 ## Paths :
 - `/swagger` - Documentation  

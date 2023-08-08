@@ -1,6 +1,10 @@
 from django.contrib import admin
 
-from users_site.models import Profile, Friend, FriendRequest
+from users_site.models import (
+    Profile,
+    Friend,
+    FriendRequest,
+)
 
 
 # Register your models here.

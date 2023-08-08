@@ -1,5 +1,7 @@
 from django.contrib.auth.models import User
+from django.core.validators import RegexValidator
 from django.db import models
+from django.utils import timezone
 
 
 class Profile(models.Model):
@@ -8,6 +10,16 @@ class Profile(models.Model):
     )
     username = models.CharField(
         verbose_name="имя пользователя", max_length=100
+    )
+    phone = models.CharField(
+        verbose_name="Office phone",
+        max_length=50,
+        validators=[
+            RegexValidator(
+                regex=r"^\+\d{3}[\s\S]*\d{2}[\s\S]*\d{3}[\s\S]*\d{2}[\s\S]*\d{2}$",
+                message="Phone number must be in the format: '+999999999999'.",
+            )
+        ],
     )
 
     def __str__(self):
@@ -26,6 +38,9 @@ class Friend(models.Model):
         verbose_name="Friend",
         on_delete=models.CASCADE,
         related_name="list_friend",
+    )
+    message = models.TextField(
+        verbose_name="Messages",
     )
 
     def __str__(self):

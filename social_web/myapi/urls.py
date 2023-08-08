@@ -1,23 +1,17 @@
-from django.urls import path
+from django.urls import path, include
+from rest_framework.routers import DefaultRouter
+
 from . import views
 
 
+router = DefaultRouter()
+router.register(r"registration", views.UserRegistrationViewSet, basename="registration",)
+router.register(r"login", views.LoginViewSet, basename="login",)
+router.register(r"token_auth", views.TokenAuthenticateViewSet, basename="token_auth",)
+router.register(r"profile", views.ProfileViewSet, basename="profile",)
+router.register(r"friends", views.FriendViewSet, basename="friends",)
+router.register(r"requests", views.RequestViewSet, basename="requests"),
+
 urlpatterns = [
-    path(
-        "registration/",
-        views.UserRegistrationAPIView.as_view(),
-        name="registration",
-    ),
-    path("friends/", views.UserFriendAPIView.as_view(), name="friends_list"),
-    path(
-        "friends/<int:id>/",
-        views.FriendDetailAPIView.as_view(),
-        name="friend_detail",
-    ),
-    path("requests/", views.RequestAPIView.as_view(), name="requests"),
-    path(
-        "requests/<int:id>",
-        views.RequestDetailAPIView.as_view(),
-        name="requests_detail",
-    ),
+    path("", include(router.urls)),
 ]

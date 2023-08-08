@@ -1,6 +1,5 @@
 from django.contrib.auth import get_user_model
 from django.contrib.auth.models import User
-from django.test import TestCase
 from django.urls import reverse
 from rest_framework.test import APIClient, APITestCase
 
@@ -77,7 +76,7 @@ class Base(APITestCase):
 class UserRegistrationAPIView(APITestCase):
     def setUp(self) -> None:
         self.client = APIClient()
-        self.url = reverse("registration")
+        self.url = reverse("registration-list")
 
     def test_post(self):
         response = self.client.post(self.url, data=dict(
@@ -94,14 +93,13 @@ class UserRegistrationAPIView(APITestCase):
         self.assertTrue(profile_exist)
 
 
-
 class UserFriendAPITestCase(Base):
     def setUp(self) -> None:
         self.client = APIClient()
-        self.url = reverse("friends_list")
         super().setUp()
 
     def test_get(self):
+        self.url = reverse("friends-list")
         response = self.client.get(self.url)
         self.assertEquals(response.status_code, 200)
         answer = {
@@ -110,22 +108,16 @@ class UserFriendAPITestCase(Base):
         }
         self.assertEquals(response.data, answer)
 
-
-class FriendDetailAPI(Base):
-    def setUp(self) -> None:
-        self.client = APIClient()
-        super().setUp()
-
     def test_get_you(self):
-        url = reverse("friend_detail", kwargs={"id": 1})
+        url = reverse("friends-detail", kwargs={"pk": 1})
         response = self.client.get(url)
-        self.assertEquals(response.status_code, 200)
         answer = {"status": "It is you're id man.", "username": "TestUser1"}
 
         self.assertEquals(response.data, answer)
+        self.assertEquals(response.status_code, 200)
 
     def test_get_friend(self):
-        url = reverse("friend_detail", kwargs={"id": 2})
+        url = reverse("friends-detail", kwargs={"pk": 2})
         response = self.client.get(url)
         self.assertEquals(response.status_code, 200)
         answer = {"status": "Already friends.", "username": "TestUser2"}
@@ -133,30 +125,30 @@ class FriendDetailAPI(Base):
         self.assertEquals(response.data, answer)
 
     def test_get_in(self):
-        url = reverse("friend_detail", kwargs={"id": 3})
+        url = reverse("friends-detail", kwargs={"pk": 3})
         response = self.client.get(url)
         self.assertEquals(response.status_code, 200)
         answer = {'status': "Incoming request.", 'username': 'TestUser3'}
         self.assertEquals(response.data, answer)
 
     def test_get_out(self):
-        url = reverse("friend_detail", kwargs={"id": 4})
+        url = reverse("friends-detail", kwargs={"pk": 4})
         response = self.client.get(url)
         self.assertEquals(response.status_code, 200)
         answer = {'status': "Outgoing request.", 'username': 'TestUser4'}
         self.assertEquals(response.data, answer)
 
     def test_delete(self):
-        url = reverse("friend_detail", kwargs={"id": 2})
+        url = reverse("friends-detail", kwargs={"pk": 2})
         response = self.client.delete(url)
         me = Friend.objects.filter(
             user=self.profile,
             friend=self.profile2,
-        )
+        ).first()
         friend = Friend.objects.filter(
             user=self.profile2,
             friend=self.profile,
-        )
+        ).first()
         self.assertFalse(me)
         self.assertFalse(friend)
         answer = {'message': "User TestUser2 was delete from you're friends list"}
@@ -179,7 +171,7 @@ class RequestAPI(Base):
         )
 
     def test_get(self):
-        url = reverse("requests")
+        url = reverse("requests-list")
         response = self.client.get(url)
         answer = {
             "username": "TestUser1",
@@ -189,7 +181,7 @@ class RequestAPI(Base):
         self.assertEquals(response.data, answer)
 
     def test_post(self):
-        url = reverse("requests")
+        url = reverse("requests-list")
         response = self.client.post(url, data={"to_user": self.profile5.id})
         request = FriendRequest.objects.filter(
             to_user=self.profile5,
@@ -201,27 +193,21 @@ class RequestAPI(Base):
         self.assertEquals(response.status_code, 201)
 
     def test_post_with_incoming_request(self):
-        url = reverse("requests")
+        url = reverse("requests-list")
         response = self.client.post(url, data={"to_user": self.profile3.id})
         answer = {'message': 'User TestUser3 add to friends'}
         self.assertEquals(response.data, answer)
         self.assertEquals(response.status_code, 201)
 
-
-class RequestDetailAPIView(Base):
-    def setUp(self) -> None:
-        self.client = APIClient()
-        super().setUp()
-
-    def test_get(self):
-        url = reverse("requests_detail", kwargs={"id": 3})
+    def test_get_id(self):
+        url = reverse("requests-detail", kwargs={"pk": 3})
         response = self.client.get(url)
         answer = {"message": "User TestUser3 wants to add you as a friend"}
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.data, answer)
 
-    def test_post_accept(self):
-        url = reverse("requests_detail", kwargs={"id": 3})
+    def test_post_accept_id(self):
+        url = reverse("requests-create-friend", kwargs={"pk": 3})
         response = self.client.post(url, data={"choice": "accept"})
         friend = Friend.objects.filter(user=self.profile, friend=self.profile3)
         answer = {
@@ -231,8 +217,8 @@ class RequestDetailAPIView(Base):
         self.assertEqual(response.data, answer)
         self.assertTrue(friend)
 
-    def test_post_decline(self):
-        url = reverse("requests_detail", kwargs={"id": 3})
+    def test_post_decline_id(self):
+        url = reverse("requests-create-friend", kwargs={"pk": 3})
         request_from_user = FriendRequest.objects.filter(
             to_user=self.profile, from_user=self.profile3
         )
@@ -244,5 +230,5 @@ class RequestDetailAPIView(Base):
         answer = {'message': 'You have not accepted the friend request from TestUser3'}
 
         self.assertFalse(request_from_user)
-        self.assertEqual(response.status_code, 200)
         self.assertEqual(response.data, answer)
+        self.assertEqual(response.status_code, 200)

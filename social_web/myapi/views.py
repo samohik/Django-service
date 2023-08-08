@@ -1,17 +1,25 @@
+import jwt
+from django.contrib.auth import login
 from django.contrib.auth.models import User
+from django.utils import timezone
 from drf_yasg import openapi
 from drf_yasg.utils import swagger_auto_schema
 from rest_framework import status
+from rest_framework.decorators import action
+from rest_framework.exceptions import AuthenticationFailed
 from rest_framework.permissions import AllowAny
 from rest_framework.request import Request
 from rest_framework.response import Response
-from rest_framework.views import APIView
+from rest_framework.viewsets import GenericViewSet, ViewSet, ModelViewSet
 
 from myapi.serializers import (
     RequestSerializer,
     RegistrationSerializer,
-    RequestDetailSerializer,
     ProfileSerializer,
+    FriendSerializer,
+    RequestDetailSerializer,
+    LoginSerializer,
+    MessageSerializer,
 )
 from myapi.utils import (
     request_handler,
@@ -21,44 +29,17 @@ from myapi.utils import (
     check_outgoing,
     remove_user_from_friends,
     remove_me_from_friends,
-    check_friends,
+    check_friends, create_jwt, decode_jwt,
 )
-from users_site.models import Profile
+from users_site.models import Profile, Friend
 
 
-class UserRegistrationAPIView(APIView):
+class UserRegistrationViewSet(GenericViewSet):
     queryset = User.objects.all()
     serializer_class = RegistrationSerializer
     permission_classes = [AllowAny]
 
-    @swagger_auto_schema(
-        operation_description="Create a new user",
-        request_body=RegistrationSerializer,
-        responses={
-            201: openapi.Response(
-                description='User created successfully',
-                schema=openapi.Schema(
-                    type=openapi.TYPE_OBJECT,
-                    properties={
-                        'username': openapi.Schema(
-                            type=openapi.TYPE_STRING,
-                            description='Username'
-                        ),
-                        'email': openapi.Schema(
-                            type=openapi.TYPE_STRING,
-                            description='Email address'
-                        ),
-                        'password': openapi.Schema(
-                            type=openapi.FORMAT_PASSWORD,
-                            description='Password'
-                        ),
-                    },
-                ),
-            ),
-            400: 'Bad Request',
-        },
-    )
-    def post(self, request: Request) -> Response:
+    def create(self, request: Request, *args, **kwargs) -> Response:
         """Register new User."""
         serializer = self.serializer_class(data=request.data)
         if serializer.is_valid():
@@ -76,53 +57,122 @@ class UserRegistrationAPIView(APIView):
             return Response({"message": "Not valid data"}, status=status.HTTP_400_BAD_REQUEST)
 
 
-class UserFriendAPIView(APIView):
-    def get_queryset(self):
-        return Profile.objects.all()
+class LoginViewSet(GenericViewSet):
+    queryset = User.objects.all()
+    serializer_class = LoginSerializer
+    permission_classes = [AllowAny]
 
-    @swagger_auto_schema(
-        operation_description="View a user's list of friends.",
-        responses={
-            status.HTTP_200_OK: openapi.Response(
-                description="Successful response",
-                schema=openapi.Schema(
-                    type=openapi.TYPE_OBJECT,
-                    properties={
-                        "user": openapi.Schema(
-                            type=openapi.TYPE_OBJECT,
-                            properties={
-                                "id": openapi.Schema(type=openapi.TYPE_INTEGER),
-                                "username": openapi.Schema(type=openapi.TYPE_STRING),
-                            },
-                        ),
-                        "friends": openapi.Schema(
-                            type=openapi.TYPE_ARRAY,
-                            items=openapi.Schema(
-                                type=openapi.TYPE_OBJECT,
-                                properties={
-                                    "id": openapi.Schema(type=openapi.TYPE_INTEGER),
-                                    "username": openapi.Schema(type=openapi.TYPE_STRING),
-                                },
-                            ),
-                        ),
-                    },
-                ),
-            ),
-        },
-    )
-    def get(self, request: Request) -> Response:
+    def create(self, request, *args, **kwargs):
+        serializer = self.serializer_class(
+            data=request.data,
+            context=self.get_serializer_context()
+        )
+        serializer.is_valid(raise_exception=True)
+        user = serializer.validated_data
+
+        token = create_jwt(user)
+
+        response = Response(status=status.HTTP_200_OK)
+        response.set_cookie(key="jwt", value=token, httponly=True)
+        response.data = {
+            "message": "Login was success",
+            "jwt": token,
+        }
+
+        return response
+
+
+class TokenAuthenticateViewSet(ViewSet):
+    permission_classes = [AllowAny, ]
+
+    def list(self, request):
+        token = request.COOKIES.get("jwt")
+        try:
+            data = decode_jwt(token)
+
+            user = User.objects.get(id=data["id"])
+            login(request, user)
+
+            return Response({"message": f"User {user.username} authorize"})
+
+        except jwt.ExpiredSignatureError:
+            raise AuthenticationFailed("JWT token has expired.")
+
+        except jwt.InvalidTokenError:
+            raise AuthenticationFailed(f"Invalid JWT token.Token {token}")
+
+        except Exception as e:
+            raise AuthenticationFailed(f"{e}")
+
+
+class ProfileViewSet(
+    ViewSet,
+):
+    serializer_class = ProfileSerializer
+    queryset = Profile.objects.all()
+    lookup_field = 'username'
+
+    def get_object(self):
+        lookup_value = self.kwargs[self.lookup_field]
+        return self.queryset.get(**{self.lookup_field: lookup_value})
+
+    def list(self, request, *args, **kwargs):
+        try:
+            user = self.queryset.get(id=request.user.id)
+        except Exception as e:
+            raise AuthenticationFailed("Unauthenticated")
+
+        return Response(
+            self.serializer_class(user).data,
+            status=status.HTTP_200_OK
+        )
+
+    @action(detail=False, methods=['put'])
+    def update_user(self, request, *args, **kwargs):
+        try:
+            user = self.queryset.get(id=request.user.id)
+        except Exception as e:
+            raise AuthenticationFailed("Unauthenticated")
+
+        serializer = self.serializer_class(
+            user,
+            data=request.data,
+            partial=True,
+        )
+        if serializer.is_valid():
+            serializer.save()
+
+            return Response(
+                serializer.data,
+                status=status.HTTP_200_OK
+            )
+
+        return Response(
+            {"message": "Data incorrect"},
+            status=status.HTTP_400_BAD_REQUEST
+        )
+
+
+class FriendViewSet(GenericViewSet):
+    queryset = Profile.objects.all()
+    serializer_class = FriendSerializer
+
+    def list(self, request: Request, *args, **kwargs) -> Response:
         """
         View a user's list of friends.
         """
         context = {}
-        query = self.get_queryset().get(id=self.request.user.id)
+        try:
+            user = self.queryset.get(id=request.user.id)
+        except Exception as e:
+            raise AuthenticationFailed("Unauthenticated")
 
         # My data
         context["user"] = {}
-        context["user"]["id"] = query.id
-        context["user"]["username"] = query.username
+        context["user"]["id"] = user.id
+        context["user"]["username"] = user.username
 
-        data = query.user_friends.select_related(
+        data = user.user_friends.select_related(
             "user",
             "friend",
         ).all()
@@ -135,39 +185,80 @@ class UserFriendAPIView(APIView):
 
         return Response(context, status=status.HTTP_200_OK)
 
+    @action(detail=True, methods=["get"])
+    def list_message(self, request, pk, *args, **kwargs) -> Response:
+        try:
+            me = self.queryset.get(username=request.user)
+        except Exception as e:
+            raise AuthenticationFailed("Unauthenticated")
 
-class FriendDetailAPIView(APIView):
-    def get_queryset(self):
-        return Profile.objects.all()
+        if request.user.id == int(pk):
+            return Response(
+                {"message": "Hello I am you"},
+                status=status.HTTP_200_OK,
+            )
 
-    @swagger_auto_schema(
-        operation_description="Get a user friend status with some other user.",
-        responses={status.HTTP_200_OK: openapi.Response(
-            description="Successful response",
-            schema=openapi.Schema(
-                type=openapi.TYPE_OBJECT,
-                properties={
-                    "username": openapi.Schema(
-                        type=openapi.TYPE_STRING,
-                    ),
-                    "status": openapi.Schema(
-                        type=openapi.TYPE_STRING,
-                    ),
-                },
-            ),
-        ),
-        },
-    )
-    def get(self, request: Request, id, ) -> Response:
+        message_from_me = Friend.objects.filter(
+            user=request.user.id,
+            friend=int(pk),
+        ).first()
+
+        data = message_from_me.message
+
+        format_text = data.split("\n")
+
+        return Response(
+            format_text,
+            status=status.HTTP_200_OK,
+        )
+
+    @action(detail=True, methods=["post"], serializer_class=MessageSerializer)
+    def create_message(self, request, pk, *args, **kwargs) -> Response:
+        try:
+            me = self.queryset.get(username=request.user)
+        except Exception as e:
+            raise AuthenticationFailed("Unauthenticated")
+
+        user = Profile.objects.get(user=request.user.id)
+        friend = Profile.objects.get(id=int(pk))
+
+        serializer = self.get_serializer(data=request.data)
+
+        if serializer.is_valid():
+
+            serializer.validated_data["user"] = user
+            serializer.validated_data["friend"] = friend
+
+            data = serializer.save()
+            return Response(
+                {"message": f"{data}"},
+                status=status.HTTP_200_OK,
+            )
+        return Response(
+                serializer.data,
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+
+    def retrieve(self, request: Request, pk, *args, **kwargs) -> Response:
         """
         Get a user friend status with some other user.
         """
         context = {}
 
-        me = self.get_queryset().filter(username=self.request.user)[0]
-        friend = Profile.objects.get(id=id)
+        try:
+            me = self.queryset.get(username=request.user)
+        except Exception as e:
+            raise AuthenticationFailed("Unauthenticated")
 
-        if id == self.request.user.id:
+        friend = Profile.objects.filter(id=pk).first()
+        if not friend:
+            return Response(
+                {"message": f"User {pk} dont exist "},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        if int(pk) == int(request.user.id):
             context["username"] = str(friend)
             context["status"] = "It is you're id man."
 
@@ -183,32 +274,32 @@ class FriendDetailAPIView(APIView):
             context["status"] = "Outgoing request."
             context["username"] = str(friend)
         else:
-            context["status"] = "Nothing"
+            context["status"] = f"Nothing"
             context["username"] = str(friend)
             return Response(context, status=status.HTTP_400_BAD_REQUEST)
 
         return Response(context, status=status.HTTP_200_OK)
 
-    @swagger_auto_schema(
-        operation_description="Remove a user from another user from their friends.",
-        responses={status.HTTP_200_OK: openapi.Response(
-            description="Successful response",
-            schema=openapi.Schema(
-                type=openapi.TYPE_OBJECT,
-                properties={
-                    "message": openapi.Schema(
-                        type=openapi.TYPE_STRING,
-                    ),
-                },
-            ),
-        ),
-        },
-    )
-    def delete(self, request: Request, id):
+    def destroy(self, request: Request, pk):
         """Remove a user from another user from their friends."""
         context = {}
-        me = self.get_queryset().get(id=self.request.user.id)
-        friend = self.get_queryset().get(id=id)
+        try:
+            me = self.queryset.get(id=request.user.id)
+        except Exception as e:
+            raise AuthenticationFailed("Unauthenticated")
+
+        friend = self.queryset.filter(id=pk).first()
+
+        if not friend:
+            return Response(
+                {"message": f"User {pk} dont exist "},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if friend.id == me.id:
+            return Response(
+                {"message": f"You cant delete yourself from friends"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
         if check_friends(me, friend):
             # Remove user from table Friend.
@@ -226,45 +317,20 @@ class FriendDetailAPIView(APIView):
             return Response({}, status=status.HTTP_400_BAD_REQUEST)
 
 
-class RequestAPIView(APIView):
+class RequestViewSet(GenericViewSet):
     serializer_class = RequestSerializer
+    queryset = Profile.objects.all()
 
-    def get_queryset(self):
-        return Profile.objects.all()
-
-    @swagger_auto_schema(
-        operation_description="View to the user a list of their outgoing and incoming friend requests.",
-        responses={status.HTTP_200_OK: openapi.Response(
-            description="Successful response",
-            schema=openapi.Schema(
-                type=openapi.TYPE_OBJECT,
-                properties={
-                    "username": openapi.Schema(
-                        type=openapi.TYPE_STRING,
-                    ),
-                    "incoming_requests": openapi.Schema(
-                        type=openapi.TYPE_ARRAY,
-                        items=openapi.Schema(
-                            type=openapi.TYPE_INTEGER,
-                        )
-                    ),
-                    "outgoing_requests": openapi.Schema(
-                        type=openapi.TYPE_ARRAY,
-                        items=openapi.Schema(
-                            type=openapi.TYPE_STRING,
-                        )
-                    ),
-                },
-            ),
-        ),
-        },
-    )
-    def get(self, request, *args, **kwargs) -> Response:
+    def list(self, request, *args, **kwargs) -> Response:
         """
         View to the user a list of their outgoing and incoming friend requests.
         """
         context = {}
-        me = self.get_queryset().get(id=self.request.user.id)
+        try:
+            me = self.queryset.get(id=request.user.id)
+        except Exception as e:
+            raise AuthenticationFailed("Unauthenticated")
+
         context["username"] = str(me.username)
 
         # To me
@@ -291,35 +357,21 @@ class RequestAPIView(APIView):
 
         return Response(context, status=status.HTTP_200_OK)
 
-    @swagger_auto_schema(
-        operation_description="Sends a friend request and works out according to the situation.",
-        request_body=RequestSerializer,
-        responses={status.HTTP_200_OK: openapi.Response(
-            description="Successful response",
-            schema=openapi.Schema(
-                type=openapi.TYPE_OBJECT,
-                properties={
-                    "message": openapi.Schema(
-                        type=openapi.TYPE_STRING,
-                    ),
-                },
-            ),
-        ),
-        },
-    )
-    def post(self, request):
+    def create(self, request, *args, **kwargs):
         """
         If user1 sends a friend request to user2 and user2
         sends an application to user1, after which they automatically become
         friends, their applications automatically accepted.
         """
         serializer = self.serializer_class(data=request.data)
-
-        me = self.get_queryset().filter(username=self.request.user)[0]
+        try:
+            me = self.queryset.get(username=request.user)
+        except Exception as e:
+            raise AuthenticationFailed("Unauthenticated")
 
         if serializer.is_valid():
             friend_name = serializer.validated_data["to_user"]
-            friend = self.get_queryset().filter(username=friend_name)[0]
+            friend = self.queryset.filter(username=friend_name)[0]
 
             existing_incoming_request = check_incoming(me, friend)
 
@@ -343,33 +395,22 @@ class RequestAPIView(APIView):
                 {"message": "Not valid data"}, status.HTTP_400_BAD_REQUEST
             )
 
-
-class RequestDetailAPIView(APIView):
-    serializer_class = RequestDetailSerializer
-
-    def get_queryset(self):
-        return Profile.objects.all()
-
-    @swagger_auto_schema(
-        operation_description="Status check with user.",
-        responses={status.HTTP_200_OK: openapi.Response(
-            description="Successful response",
-            schema=openapi.Schema(
-                type=openapi.TYPE_OBJECT,
-                properties={
-                    "message": openapi.Schema(
-                        type=openapi.TYPE_STRING,
-                    ),
-                },
-            ),
-        ),
-        },
-    )
-    def get(self, request: Request, id):
+    def retrieve(self, request: Request, pk):
         """Status check with user."""
         context = {}
-        me = self.get_queryset().get(id=self.request.user.id)
-        user = self.get_queryset().get(id=id)
+
+        try:
+            me = self.queryset.get(id=request.user.id)
+        except Exception as e:
+            raise AuthenticationFailed("Unauthenticated")
+
+        user = self.queryset.filter(id=pk).first()
+        if not user:
+            return Response(
+                {"message": f"User {pk} dont exist "},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
         request_from_me = check_incoming(me, user)
         if request_from_me:
             context["message"] = f"User {user.username} wants to add you as a friend"
@@ -378,27 +419,27 @@ class RequestDetailAPIView(APIView):
 
         return Response(context)
 
-    @swagger_auto_schema(
-        operation_description="Accept or reject a user's friend request from another user.",
-        request_body=RequestDetailSerializer,
-        responses={status.HTTP_200_OK: openapi.Response(
-            description="Successful response",
-            schema=openapi.Schema(
-                type=openapi.TYPE_OBJECT,
-                properties={
-                    "message": openapi.Schema(
-                        type=openapi.TYPE_STRING,
-                    ),
-                },
-            ),
-        ),
-        },
-    )
-    def post(self, request: Request, id) -> Response:
+    @action(detail=True, methods=['post'], serializer_class=RequestDetailSerializer)
+    def create_friend(self, request: Request, pk) -> Response:
         """Accept or reject a user's friend request from another user."""
-        me = self.get_queryset().get(id=self.request.user.id)
-        friend = self.get_queryset().get(id=id)
-        serializer = self.serializer_class(data=request.data)
+        try:
+            me = self.queryset.get(id=request.user.id)
+        except Exception as e:
+            raise AuthenticationFailed("Unauthenticated")
+
+        friend = self.queryset.filter(id=pk).first()
+        if not friend:
+            return Response(
+                {"message": f"User {pk} dont exist "},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        elif friend.id == me.id:
+            return Response(
+                {"message": f"You cant accept from yourself request"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        serializer = RequestDetailSerializer(data=request.data)
 
         friend_request_to_me_exist = check_incoming(me, friend)
         if friend_request_to_me_exist:

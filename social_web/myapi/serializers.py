@@ -2,9 +2,7 @@ import datetime
 
 from django.contrib.auth import login, authenticate
 from django.contrib.auth.models import User
-from django.contrib.auth.password_validation import validate_password
 from django.core.validators import RegexValidator
-from django.utils import timezone
 from rest_framework import serializers
 from rest_framework.exceptions import AuthenticationFailed
 

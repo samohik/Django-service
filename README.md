@@ -9,12 +9,13 @@
 ```python manage.py createsuperuser```  
 ```python manage.py runserver```  
 
+
+
 ### or using Docker:  
 ```sudo docker-compose build```  
 ```sudo docker-compose up```  
 
 ## Paths :
-- `/swagger` - Documentation.  
 - `/api/registration` 
   - `post` - Create a new user.
 - `/api/login` 
